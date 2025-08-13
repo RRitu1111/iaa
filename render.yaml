@@ -3,6 +3,6 @@ services:
     name: iaa-backend
     env: python
     plan: free
-    buildCommand: pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
-    startCommand: gunicorn working_backend:app
     pythonVersion: 3.11.9
+    buildCommand: pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
+    startCommand: gunicorn working_backend:app -k uvicorn.workers.UvicornWorker
