@@ -1,0 +1,160 @@
+.scroll-to-top {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  width: 60px;
+  height: 60px;
+  background: linear-gradient(135deg, #2196F3, #1976D2);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  box-shadow: 0 4px 20px rgba(33, 150, 243, 0.3);
+  color: white;
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.scroll-to-top:hover {
+  background: linear-gradient(135deg, #1976D2, #1565C0);
+  transform: translateY(-2px);
+}
+
+.scroll-to-top:active {
+  transform: translateY(0);
+}
+
+.fighter-jet {
+  width: 35px;
+  height: 35px;
+  color: white;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+.jet-body {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+.jet-wing-left,
+.jet-wing-right {
+  opacity: 0.9;
+}
+
+.jet-cockpit {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+}
+
+.jet-flame {
+  filter: drop-shadow(0 1px 3px rgba(255, 107, 53, 0.6));
+}
+
+.nav-light-left,
+.nav-light-right {
+  filter: drop-shadow(0 0 3px currentColor);
+}
+
+.boost-effect {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(33, 150, 243, 0.3) 0%,
+    rgba(33, 150, 243, 0.1) 50%,
+    transparent 70%
+  );
+  pointer-events: none;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .scroll-to-top {
+    bottom: 20px;
+    right: 20px;
+    width: 50px;
+    height: 50px;
+  }
+  
+  .fighter-jet {
+    width: 28px;
+    height: 28px;
+  }
+  
+  .boost-effect {
+    width: 65px;
+    height: 65px;
+  }
+}
+
+/* Accessibility */
+.scroll-to-top:focus {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.scroll-to-top:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.scroll-to-top:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* Animation for when button appears */
+@keyframes jetTakeoff {
+  0% {
+    transform: translateY(100px) scale(0.5) rotate(180deg);
+    opacity: 0;
+  }
+  50% {
+    transform: translateY(20px) scale(0.8) rotate(90deg);
+    opacity: 0.7;
+  }
+  100% {
+    transform: translateY(0) scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+/* Hover effects for the jet parts */
+.scroll-to-top:hover .jet-flame {
+  filter: drop-shadow(0 1px 5px rgba(255, 107, 53, 0.8));
+}
+
+.scroll-to-top:hover .nav-light-left,
+.scroll-to-top:hover .nav-light-right {
+  filter: drop-shadow(0 0 5px currentColor);
+}
+
+/* Pulse effect on hover */
+.scroll-to-top:hover::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.5);
+    opacity: 0;
+  }
+}
