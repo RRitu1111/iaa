@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "iaa-backend"
+version = "0.1.0"
+description = "IAA Feedback System Backend"
+authors = ["Akshay <ritugarg11111@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "3.11.9"
+fastapi = "0.104.1"
+uvicorn = { extras = ["standard"], version = "0.24.0" }
+psycopg2-binary = "2.9.9"
+python-multipart = "0.0.6"
+python-jose = { extras = ["cryptography"], version = "3.3.0" }
+passlib = { extras = ["bcrypt"], version = "1.7.4" }
+PyJWT = "2.8.0"
+python-dotenv = "1.0.0"
+pydantic = "2.6.3"
+sqlalchemy = "2.0.23"
+alembic = "1.13.1"
+reportlab = "4.0.7"
+matplotlib = "3.8.2"
+numpy = "1.26.4"
+pillow = "10.1.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
