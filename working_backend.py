@@ -103,7 +103,8 @@ ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
     "http://localhost:3000",
-    "http://127.0.0.1:3000"
+    "http://127.0.0.1:3000",
+    "https://iaa-feedback.vercel.app"
 ]
 
 # Add both standard CORS middleware and custom middleware
