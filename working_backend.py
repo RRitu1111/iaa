@@ -104,7 +104,8 @@ ALLOWED_ORIGINS = [
     "http://127.0.0.1:5174",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https://iaa-feedback.vercel.app"
+    "https://iaa-feedback.vercel.app",  # Add your Vercel domain
+    "https://iaa-feedback.vercel.app/"  # Also add with trailing slash
 ]
 
 # Add both standard CORS middleware and custom middleware
@@ -3383,7 +3384,7 @@ async def get_form_responses(form_id: int, current_user: dict = Depends(get_curr
 
 # Department endpoints
 @app.get("/departments")
-async def get_departments():
+async def get_departments(current_user: dict = Depends(get_current_user)):
     try:
         with get_db() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
