@@ -1234,12 +1234,12 @@ def init_database():
             hashed_password = bcrypt.hashpw(admin_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
             cur.execute("""
-                INSERT INTO users (email, first_name, last_name, password_hash, role, department_id, is_active)
+                INSERT INTO users (email, first_name, last_name, hashed_password, role, department_id, is_active)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (email) DO UPDATE SET
                     first_name = EXCLUDED.first_name,
                     last_name = EXCLUDED.last_name,
-                    password_hash = EXCLUDED.password_hash,
+                    hashed_password = EXCLUDED.hashed_password,
                     role = EXCLUDED.role,
                     department_id = EXCLUDED.department_id,
                     is_active = EXCLUDED.is_active
@@ -1502,7 +1502,7 @@ async def register(user_data: UserRegister):
 
                 # Insert user
                 cur.execute("""
-                    INSERT INTO users (email, first_name, last_name, password_hash, role, department_id, supervisor_email, is_active, created_at, updated_at)
+                    INSERT INTO users (email, first_name, last_name, hashed_password, role, department_id, supervisor_email, is_active, created_at, updated_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     RETURNING id, email, first_name, last_name, role, department_id, supervisor_email, is_active, created_at
                 """, (user_data.email, user_data.first_name, user_data.last_name,
@@ -1576,7 +1576,7 @@ async def login(login_data: UserLogin):
                             raise HTTPException(status_code=401, detail=f"User ID '{login_data.userId}' is not registered. Please register first.")
 
                     # Verify password against stored hash
-                    if not verify_password(login_data.password, user["password_hash"]):
+                    if not verify_password(login_data.password, user["hashed_password"]):
 
                         raise HTTPException(status_code=401, detail="Wrong password. Please check your password and try again.")
 
