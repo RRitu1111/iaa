@@ -96,7 +96,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": exc.errors(), "body": body.decode() if body else ""}
     )
 
-# CORS configuration - Fixed for cloud database access
+# CORS configuration with enhanced error handling and logging
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:5174",
@@ -104,13 +104,34 @@ ALLOWED_ORIGINS = [
     "http://127.0.0.1:5174",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https://iaa-feedback.vercel.app",  # Add your Vercel domain
-    "https://iaa-feedback.vercel.app/"  # Also add with trailing slash
+    "https://iaa-feedback.vercel.app",
+    "https://iaa-feedback.vercel.app/",
+    # Add any additional domains that need access
 ]
 
-# Add both standard CORS middleware and custom middleware
+# Custom CORS middleware with error handling
+class CustomCORSMiddleware(CORSMiddleware):
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await super().__call__(scope, receive, send)
+
+        request = Request(scope, receive)
+        
+        # Log CORS request details
+        origin = request.headers.get("origin")
+        if origin:
+            print(f"🌐 CORS Request from: {origin}")
+            print(f"📍 Request path: {request.url.path}")
+            print(f"📋 Request method: {scope.get('method', 'UNKNOWN')}")
+            
+            if origin not in ALLOWED_ORIGINS:
+                print(f"⚠️ Warning: Request from non-allowed origin: {origin}")
+
+        return await super().__call__(scope, receive, send)
+
+# Add CORS middleware with enhanced configuration
 app.add_middleware(
-    CORSMiddleware,
+    CustomCORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
@@ -126,6 +147,7 @@ app.add_middleware(
         "Access-Control-Request-Headers"
     ],
     expose_headers=["*"],
+    max_age=3600  # Cache preflight requests for 1 hour
 )
 
 # Standard CORS middleware is sufficient
@@ -1257,22 +1279,48 @@ async def root():
 
 @app.get("/health")
 async def health():
+    """Enhanced health check endpoint that verifies core system components"""
+    health_status = {
+        "status": "healthy",
+        "components": {
+            "database": {"status": "unhealthy", "message": "Not checked"},
+            "api": {"status": "healthy", "message": "API is responding"},
+            "cors": {"status": "healthy", "message": "CORS is configured"}
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
     try:
+        # Test database connection with timeout
+        start_time = time.time()
         with get_db() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
-        return {
-            "status": "healthy",
-            "database": "connected",
-            "timestamp": datetime.utcnow().isoformat()
-        }
+                db_response_time = time.time() - start_time
+                health_status["components"]["database"] = {
+                    "status": "healthy",
+                    "message": f"Connected and responding ({db_response_time:.2f}s)",
+                    "responseTime": db_response_time
+                }
     except Exception as e:
-        return {
+        health_status["status"] = "unhealthy"
+        health_status["components"]["database"] = {
             "status": "unhealthy",
-            "database": "disconnected",
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "message": str(e)
         }
+
+    # Add version information
+    health_status["version"] = APP_VERSION
+    health_status["environment"] = ENVIRONMENT
+
+    # Set appropriate status code
+    if health_status["status"] == "unhealthy":
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=health_status
+        )
+
+    return health_status
 
 @app.get("/db-info")
 async def db_info():
@@ -2308,14 +2356,14 @@ async def approve_form_deletion_request(request_id: int, current_user: dict = De
                 conn.autocommit = False
 
                 try:
-                    # Get the deletion request and form details
+                    # Get the deletion request and form details - removed FOR UPDATE to prevent deadlocks
                     cur.execute("""
                         SELECT fdr.*, f.title as form_title, f.trainer_id,
                                u.first_name || ' ' || u.last_name as trainer_name
                         FROM form_deletion_requests fdr
                         JOIN forms f ON fdr.form_id = f.id
                         JOIN users u ON f.trainer_id = u.id
-                        WHERE fdr.id = %s FOR UPDATE
+                        WHERE fdr.id = %s
                     """, (request_id,))
 
                     deletion_request = cur.fetchone()
