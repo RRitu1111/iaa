@@ -2120,38 +2120,78 @@ async def create_form_deletion_request(form_id: int, request_data: FormDeletionR
 
     # Only trainers can request form deletion
     if current_user["role"] != "trainer":
-        raise HTTPException(status_code=403, detail="Only trainers can request form deletion")
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied. Only trainers can request form deletion."
+        )
 
     try:
         with get_db() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Check if form exists and belongs to the trainer
-                cur.execute("SELECT * FROM forms WHERE id = %s", (form_id,))
+                # Check if form exists
+                cur.execute("""
+                    SELECT f.*, u.first_name || ' ' || u.last_name as trainer_name
+                    FROM forms f
+                    LEFT JOIN users u ON f.trainer_id = u.id
+                    WHERE f.id = %s
+                """, (form_id,))
                 form = cur.fetchone()
 
                 if not form:
-                    raise HTTPException(status_code=404, detail="Form not found")
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Form not found. The specified form does not exist."
+                    )
 
                 form_dict = dict(form)
 
                 # Check if trainer owns the form
                 if form_dict["trainer_id"] != current_user["id"]:
-                    raise HTTPException(status_code=403, detail="You can only request deletion of your own forms")
+                    trainer_name = form_dict.get("trainer_name", "another trainer")
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Access denied. This form belongs to {trainer_name}. You can only request deletion of your own forms."
+                    )
 
-                # Check if there's already a pending deletion request
+                # Check if form has any active responses
                 cur.execute("""
-                    SELECT * FROM form_deletion_requests
-                    WHERE form_id = %s AND status = 'pending'
+                    SELECT COUNT(*) FROM form_responses WHERE form_id = %s
+                """, (form_id,))
+                response_count = cur.fetchone()["count"]
+
+                if response_count > 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Cannot request deletion. This form has {response_count} responses. Please contact an administrator for assistance."
+                    )
+
+                # Check if there's already any deletion request
+                cur.execute("""
+                    SELECT status FROM form_deletion_requests 
+                    WHERE form_id = %s 
+                    ORDER BY created_at DESC 
+                    LIMIT 1
                 """, (form_id,))
                 existing_request = cur.fetchone()
 
                 if existing_request:
-                    raise HTTPException(status_code=400, detail="A deletion request for this form is already pending")
+                    status = existing_request["status"]
+                    if status == "pending":
+                        raise HTTPException(
+                            status_code=400,
+                            detail="A deletion request for this form is already pending review."
+                        )
+                    elif status == "approved":
+                        raise HTTPException(
+                            status_code=400,
+                            detail="This form has already been approved for deletion."
+                        )
 
-                # Create deletion request
+                # Create deletion request with explicit status
                 cur.execute("""
-                    INSERT INTO form_deletion_requests (form_id, trainer_id, reason, created_at)
-                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                    INSERT INTO form_deletion_requests 
+                    (form_id, trainer_id, reason, status, created_at)
+                    VALUES (%s, %s, %s, 'pending', CURRENT_TIMESTAMP)
                     RETURNING id, form_id, trainer_id, reason, status, created_at
                 """, (form_id, current_user["id"], request_data.reason))
 
@@ -2160,7 +2200,7 @@ async def create_form_deletion_request(form_id: int, request_data: FormDeletionR
 
                 return {
                     "success": True,
-                    "message": "Form deletion request submitted successfully",
+                    "message": "Form deletion request submitted successfully and is pending admin review.",
                     "request": {
                         "id": deletion_request["id"],
                         "form_id": deletion_request["form_id"],
@@ -2174,9 +2214,17 @@ async def create_form_deletion_request(form_id: int, request_data: FormDeletionR
 
     except HTTPException:
         raise
+    except psycopg2.Error as e:
+        conn.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error: {str(e)}"
+        )
     except Exception as e:
-
-        raise HTTPException(status_code=500, detail=f"Failed to create deletion request: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create deletion request: {str(e)}"
+        )
 
 @app.get("/form-deletion-requests")
 async def get_form_deletion_requests(current_user: dict = Depends(get_current_user)):
@@ -2248,64 +2296,148 @@ async def approve_form_deletion_request(request_id: int, current_user: dict = De
 
     # Only admins can approve deletion requests
     if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can approve deletion requests")
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied. Only administrators can approve deletion requests."
+        )
 
     try:
         with get_db() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Get the deletion request
-                cur.execute("""
-                    SELECT fdr.*, f.title as form_title
-                    FROM form_deletion_requests fdr
-                    JOIN forms f ON fdr.form_id = f.id
-                    WHERE fdr.id = %s AND fdr.status = 'pending'
-                """, (request_id,))
+                # Start transaction
+                conn.autocommit = False
 
-                deletion_request = cur.fetchone()
-                if not deletion_request:
-                    raise HTTPException(status_code=404, detail="Deletion request not found or already processed")
+                try:
+                    # Get the deletion request and form details
+                    cur.execute("""
+                        SELECT fdr.*, f.title as form_title, f.trainer_id,
+                               u.first_name || ' ' || u.last_name as trainer_name
+                        FROM form_deletion_requests fdr
+                        JOIN forms f ON fdr.form_id = f.id
+                        JOIN users u ON f.trainer_id = u.id
+                        WHERE fdr.id = %s FOR UPDATE
+                    """, (request_id,))
 
-                req_dict = dict(deletion_request)
-                form_id = req_dict["form_id"]
+                    deletion_request = cur.fetchone()
+                    if not deletion_request:
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Deletion request not found. It may have been already processed or deleted."
+                        )
 
-                # Delete the form and all related data
-                # First delete form responses
-                cur.execute("DELETE FROM form_responses WHERE form_id = %s", (form_id,))
+                    req_dict = dict(deletion_request)
+                    form_id = req_dict["form_id"]
 
-                # Then delete the form
-                cur.execute("DELETE FROM forms WHERE id = %s", (form_id,))
+                    # Verify request is still pending
+                    if req_dict["status"] != "pending":
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Cannot approve request. Current status is '{req_dict['status']}'."
+                        )
 
-                # Update the deletion request status
-                cur.execute("""
-                    UPDATE form_deletion_requests
-                    SET status = 'approved',
-                        admin_response = 'Form deleted successfully',
-                        reviewed_by = %s,
-                        reviewed_at = CURRENT_TIMESTAMP
-                    WHERE id = %s
-                    RETURNING *
-                """, (current_user["id"], request_id))
+                    # Check for any dependencies or constraints
+                    cur.execute("""
+                        SELECT COUNT(*) as count FROM form_responses 
+                        WHERE form_id = %s
+                    """, (form_id,))
+                    response_count = cur.fetchone()["count"]
 
-                updated_request = dict(cur.fetchone())
-                conn.commit()
+                    if response_count > 0:
+                        # Update request status to need_review instead of failing
+                        cur.execute("""
+                            UPDATE form_deletion_requests
+                            SET status = 'need_review',
+                                admin_response = %s,
+                                reviewed_by = %s,
+                                reviewed_at = CURRENT_TIMESTAMP
+                            WHERE id = %s
+                            RETURNING *
+                        """, (
+                            f"Form has {response_count} responses. Manual review required.",
+                            current_user["id"],
+                            request_id
+                        ))
+                        
+                        conn.commit()
+                        
+                        return {
+                            "success": False,
+                            "message": f"Form '{req_dict['form_title']}' has {response_count} responses and cannot be automatically deleted. Manual review required.",
+                            "request": {
+                                "id": req_dict["id"],
+                                "form_id": req_dict["form_id"],
+                                "status": "need_review",
+                                "admin_response": f"Form has {response_count} responses. Manual review required."
+                            }
+                        }
 
-                return {
-                    "success": True,
-                    "message": f"Form '{req_dict['form_title']}' has been deleted successfully",
-                    "request": {
-                        "id": updated_request["id"],
-                        "form_id": updated_request["form_id"],
-                        "status": updated_request["status"],
-                        "admin_response": updated_request["admin_response"],
-                        "reviewed_at": updated_request["reviewed_at"].isoformat() if updated_request["reviewed_at"] else None
+                    # Begin deletion process
+                    # 1. Delete form responses (if any remain)
+                    cur.execute("DELETE FROM form_responses WHERE form_id = %s", (form_id,))
+                    
+                    # 2. Delete any other related data
+                    # Add other cleanup queries here if needed
+                    
+                    # 3. Delete the form itself
+                    cur.execute("DELETE FROM forms WHERE id = %s", (form_id,))
+                    
+                    if cur.rowcount == 0:
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Form not found or already deleted."
+                        )
+
+                    # 4. Update the deletion request status
+                    cur.execute("""
+                        UPDATE form_deletion_requests
+                        SET status = 'approved',
+                            admin_response = 'Form and related data deleted successfully',
+                            reviewed_by = %s,
+                            reviewed_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                        RETURNING *
+                    """, (current_user["id"], request_id))
+
+                    updated_request = dict(cur.fetchone())
+                    
+                    # If we get here, everything succeeded, so commit the transaction
+                    conn.commit()
+
+                    return {
+                        "success": True,
+                        "message": f"Form '{req_dict['form_title']}' has been successfully deleted",
+                        "request": {
+                            "id": updated_request["id"],
+                            "form_id": updated_request["form_id"],
+                            "status": updated_request["status"],
+                            "admin_response": updated_request["admin_response"],
+                            "reviewed_at": updated_request["reviewed_at"].isoformat() if updated_request["reviewed_at"] else None,
+                            "trainer_name": req_dict["trainer_name"]
+                        }
                     }
-                }
+
+                except HTTPException as http_error:
+                    conn.rollback()
+                    raise http_error
+                except psycopg2.Error as db_error:
+                    conn.rollback()
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Database error: {str(db_error)}"
+                    )
+                except Exception as e:
+                    conn.rollback()
+                    raise e
+                finally:
+                    conn.autocommit = True
 
     except HTTPException:
         raise
     except Exception as e:
-
-        raise HTTPException(status_code=500, detail=f"Failed to approve deletion request: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process deletion request: {str(e)}"
+        )
 
 @app.put("/form-deletion-requests/{request_id}/reject")
 async def reject_form_deletion_request(request_id: int, rejection_data: dict, current_user: dict = Depends(get_current_user)):
