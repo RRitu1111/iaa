@@ -50,7 +50,19 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 load_dotenv()
 
 # Cloud Database Configuration
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres.ltsosvqwyqqzmfnepchd:anshious%232004@aws-0-ap-south-1.pooler.supabase.com:6543/postgres")
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    print("Warning: DATABASE_URL not found in environment variables. Using default configuration.")
+    # Construct database URL from individual components for better security
+    DB_USER = os.getenv("DB_USER", "postgres.ltsosvqwyqqzmfnepchd")
+    DB_PASSWORD = os.getenv("DB_PASSWORD", "anshious#2004")
+    DB_HOST = os.getenv("DB_HOST", "aws-0-ap-south-1.pooler.supabase.com")
+    DB_PORT = os.getenv("DB_PORT", "6543")
+    DB_NAME = os.getenv("DB_NAME", "postgres")
+    
+    # Construct URL with proper escaping of special characters
+    from urllib.parse import quote_plus
+    DATABASE_URL = f"postgresql://{quote_plus(DB_USER)}:{quote_plus(DB_PASSWORD)}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 JWT_SECRET = os.getenv("JWT_SECRET", "iaa-production-jwt-secret-2024")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
@@ -171,18 +183,25 @@ def get_db():
         conn = psycopg2.connect(
             DATABASE_URL,
             connect_timeout=10,
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5,
             application_name="IAA_Feedback_System"
         )
         yield conn
     except psycopg2.OperationalError as e:
-
-        raise HTTPException(status_code=503, detail="Database service unavailable")
+        print(f"Database connection error: {str(e)}")
+        raise HTTPException(status_code=503, detail=f"Database service unavailable: {str(e)}")
     except Exception as e:
-
-        raise HTTPException(status_code=500, detail="Database error")
+        print(f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     finally:
-        if 'conn' in locals():
-            conn.close()
+        try:
+            if 'conn' in locals() and conn:
+                conn.close()
+        except Exception:
+            pass
 
 # Pydantic models
 class UserRegister(BaseModel):
@@ -906,9 +925,12 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 
 # Initialize database
 def init_database():
-
-    with get_db() as conn:
-        with conn.cursor() as cur:
+    """Initialize the database schema and create default records"""
+    print("Initializing database...")
+    try:
+        with get_db() as conn:
+            conn.autocommit = False  # Start transaction mode
+            with conn.cursor() as cur:
             # Create tables
 
             # Departments table
@@ -1253,16 +1275,34 @@ def init_database():
                 True
             ))
 
-            conn.commit()
+            try:
+                conn.commit()
+                print("Database changes committed successfully")
+            except Exception as commit_error:
+                conn.rollback()
+                print(f"Error committing changes: {str(commit_error)}")
+                raise
 
 # Initialize database on startup
 def startup_handler():
+    """Handle database initialization during application startup"""
     try:
+        print("Starting database initialization...")
         init_database()
-
+        print("Database initialization completed successfully")
+    except HTTPException as he:
+        print(f"HTTP error during startup: {str(he)}")
+        raise he
     except Exception as e:
-
-        raise
+        print(f"Error during startup: {str(e)}")
+        # Log the full error details
+        import traceback
+        print("Full error traceback:")
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to initialize database: {str(e)}"
+        )
 
 # Call startup handler when module is imported
 startup_handler()
