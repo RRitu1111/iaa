@@ -1456,26 +1456,26 @@ async def setup():
 async def register(user_data: UserRegister):
 
     try:
-        with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Check if user exists
-                cur.execute("SELECT id FROM users WHERE email = %s", (user_data.email,))
-                if cur.fetchone():
 
+        with get_db() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                # Check if user exists
+                cursor.execute("SELECT id FROM users WHERE email = %s", (user_data.email,))
+                if cursor.fetchone():
                     raise HTTPException(status_code=400, detail="Email already registered")
 
                 # Hash password
-                hashed_password = hash_password(user_data.password)
+                password_hash = hash_password(user_data.password)
 
-                # Insert user
+                # Insert user (ensure column is 'password_hash')
                 cursor.execute("""
-                    INSERT INTO users (email, first_name, last_name, hashed_password, role, department_id, supervisor_email, is_active, created_at, updated_at)
+                    INSERT INTO users (email, first_name, last_name, password_hash, role, department_id, supervisor_email, is_active, created_at, last_login)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     RETURNING id, email, first_name, last_name, role, department_id, supervisor_email, is_active, created_at
                 """, (user_data.email, user_data.first_name, user_data.last_name,
-                     hashed_password, user_data.role, user_data.department_id, user_data.supervisor_email, True))
+                     password_hash, user_data.role, user_data.department_id, user_data.supervisor_email, True))
 
-                user = dict(cur.fetchone())
+                user = dict(cursor.fetchone())
                 conn.commit()
 
                 # Create token
