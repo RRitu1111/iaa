@@ -1058,33 +1058,33 @@ async def init_database():
             except Exception:
                 pass
 
-                cur.execute("ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT TRUE")
+                cursor.execute("ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT TRUE")
 
-            cur.execute("""
+        cursor.execute("""
                 SELECT column_name FROM information_schema.columns
                 WHERE table_name = 'users' AND column_name = 'last_login'
             """)
-            if not cur.fetchone():
+        if not cursor.fetchone():
 
-                cur.execute("ALTER TABLE users ADD COLUMN last_login TIMESTAMP")
+                cursor.execute("ALTER TABLE users ADD COLUMN last_login TIMESTAMP")
 
-            cur.execute("""
+        cursor.execute("""
                 SELECT column_name FROM information_schema.columns
                 WHERE table_name = 'users' AND column_name = 'has_selected_departments'
             """)
-            if not cur.fetchone():
-                cur.execute("ALTER TABLE users ADD COLUMN has_selected_departments BOOLEAN DEFAULT FALSE")
+        if not cursor.fetchone():
+                cursor.execute("ALTER TABLE users ADD COLUMN has_selected_departments BOOLEAN DEFAULT FALSE")
 
             # Check if users table has supervisor_email column, if not add it
-            cur.execute("""
+        cursor.execute("""
                 SELECT column_name FROM information_schema.columns
                 WHERE table_name = 'users' AND column_name = 'supervisor_email'
             """)
-            if not cur.fetchone():
-                cur.execute("ALTER TABLE users ADD COLUMN supervisor_email VARCHAR(255)")
+        if not cursor.fetchone():
+                cursor.execute("ALTER TABLE users ADD COLUMN supervisor_email VARCHAR(255)")
 
             # Forms table
-            cur.execute("""
+        cursor.execute("""
                 CREATE TABLE IF NOT EXISTS forms (
                     id SERIAL PRIMARY KEY,
                     title VARCHAR(500) NOT NULL,
