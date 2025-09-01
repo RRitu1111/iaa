@@ -928,11 +928,136 @@ def init_database():
     """Initialize the database schema and create default records"""
     print("Initializing database schema and default records...")
     
+    connection = None
+    cursor = None
     try:
-        with get_db() as conn:
-            conn.autocommit = False  # Enable transaction mode
-            with conn.cursor() as cur:
-                print("Creating/updating database tables...")
+        # Establish connection
+        connection = psycopg2.connect(
+            DATABASE_URL,
+            connect_timeout=10,
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5,
+            application_name="IAA_Feedback_System"
+        )
+        connection.autocommit = False  # Enable transaction mode
+        cursor = connection.cursor()
+        
+        print("Creating/updating database tables...")
+        
+        # Departments table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS departments (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(200) NOT NULL,
+                code VARCHAR(20) UNIQUE NOT NULL,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Insert default departments
+        cursor.execute("""
+            INSERT INTO departments (name, code, description) VALUES
+            ('Flight Operations', 'DEPT001', 'Flight training and operations'),
+            ('Aircraft Maintenance', 'DEPT002', 'Aircraft maintenance and engineering'),
+            ('Air Traffic Control', 'DEPT003', 'Air traffic control operations'),
+            ('Ground Operations', 'DEPT004', 'Ground handling and operations'),
+            ('Aviation Safety', 'DEPT005', 'Safety and security operations'),
+            ('Cabin Crew', 'DEPT006', 'Cabin crew training and operations')
+            ON CONFLICT (code) DO NOTHING
+        """)
+        
+        # Users table with all necessary columns
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                first_name VARCHAR(100) NOT NULL,
+                last_name VARCHAR(100) NOT NULL,
+                hashed_password VARCHAR(255) NOT NULL,
+                role VARCHAR(20) NOT NULL,
+                department_id INTEGER,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMP,
+                has_selected_departments BOOLEAN DEFAULT FALSE,
+                supervisor_email VARCHAR(255)
+            )
+        """)
+        
+        # Create admin user
+        admin_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "admin123")
+        hashed_password = bcrypt.hashpw(admin_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        
+        cursor.execute("""
+            INSERT INTO users (email, first_name, last_name, hashed_password, role, department_id, is_active)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (email) DO UPDATE SET
+                first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name,
+                hashed_password = EXCLUDED.hashed_password,
+                role = EXCLUDED.role,
+                department_id = EXCLUDED.department_id,
+                is_active = EXCLUDED.is_active
+        """, ('admin@iaa.edu.in', 'System', 'Administrator', hashed_password, 'admin', 1, True))
+        
+        # Forms table with all fields
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS forms (
+                id SERIAL PRIMARY KEY,
+                title VARCHAR(500) NOT NULL,
+                description TEXT,
+                creator_id INTEGER,
+                department_id INTEGER,
+                trainer_id INTEGER,
+                form_data JSONB NOT NULL,
+                status VARCHAR(20) DEFAULT 'draft',
+                type VARCHAR(20) DEFAULT 'single-use',
+                due_date TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                published_at TIMESTAMP,
+                is_published BOOLEAN DEFAULT FALSE,
+                form_request_id INTEGER
+            )
+        """)
+        
+        # Form responses table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS form_responses (
+                id SERIAL PRIMARY KEY,
+                form_id INTEGER NOT NULL,
+                user_id INTEGER,
+                response_data JSONB NOT NULL,
+                is_anonymous BOOLEAN DEFAULT FALSE,
+                is_complete BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Commit all changes
+        connection.commit()
+        print("Database initialization completed successfully")
+        
+    except Exception as e:
+        if connection:
+            connection.rollback()
+        print(f"Error during database initialization: {str(e)}")
+        import traceback
+        print("Full error traceback:")
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database initialization failed: {str(e)}"
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
                 
                 # Departments table
                 cur.execute("""
