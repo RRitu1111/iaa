@@ -1103,25 +1103,25 @@ async def init_database():
             """)
 
             # Add due_date column if it doesn't exist (for existing databases)
-            cur.execute("""
+            cursor.execute("""
                 ALTER TABLE forms
                 ADD COLUMN IF NOT EXISTS due_date TIMESTAMP
             """)
 
             # Add status column if it doesn't exist and migrate from is_published
-            cur.execute("""
+            cursor.execute("""
                 ALTER TABLE forms
                 ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'draft'
             """)
 
             # Add creator_id column if it doesn't exist and migrate from trainer_id
-            cur.execute("""
+            cursor.execute("""
                 ALTER TABLE forms
                 ADD COLUMN IF NOT EXISTS creator_id INTEGER REFERENCES users(id)
             """)
 
             # Migrate existing data from trainer_id to creator_id if creator_id is null
-            cur.execute("""
+            cursor.execute("""
                 UPDATE forms
                 SET creator_id = trainer_id
                 WHERE creator_id IS NULL AND trainer_id IS NOT NULL
