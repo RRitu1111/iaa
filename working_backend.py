@@ -1737,7 +1737,7 @@ async def get_forms(current_user: dict = Depends(get_current_user)):
 
     try:
         with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 if current_user["role"] == "admin":
                     # Admin sees all forms with response counts - using subquery for accurate counting
                     cursor.execute("""
@@ -1789,7 +1789,7 @@ async def get_forms(current_user: dict = Depends(get_current_user)):
                     """, (current_user["id"], current_user["department_id"]))
 
                 forms = []
-                for row in cur.fetchall():
+                for row in cursor.fetchall():
                     form_dict = dict(row)
 
                     # Parse form_data JSON if it exists
@@ -1817,7 +1817,6 @@ async def get_forms(current_user: dict = Depends(get_current_user)):
                     "forms": forms
                 }
     except Exception as e:
-
         raise HTTPException(status_code=500, detail=f"Failed to get forms: {str(e)}")
 
 @app.get("/forms/{form_id}")
@@ -1825,7 +1824,7 @@ async def get_form(form_id: int, current_user: dict = Depends(get_current_user))
 
     try:
         with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute("""
                     SELECT f.*,
                            COALESCE(u.first_name || ' ' || u.last_name, 'Unknown Trainer') as creator_name,
@@ -1837,7 +1836,7 @@ async def get_form(form_id: int, current_user: dict = Depends(get_current_user))
                     WHERE f.id = %s
                 """, (form_id,))
 
-                form = cur.fetchone()
+                form = cursor.fetchone()
                 if not form:
                     raise HTTPException(status_code=404, detail="Form not found")
 
