@@ -3604,7 +3604,7 @@ async def get_form_responses(form_id: int, current_user: dict = Depends(get_curr
 
 # Department endpoints
 @app.get("/departments")
-async def get_departments(current_user: dict = Depends(get_current_user)):
+async def get_departments():
     try:
         with get_db() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
