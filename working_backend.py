@@ -969,7 +969,7 @@ async def init_database():
                 email VARCHAR(255) UNIQUE NOT NULL,
                 first_name VARCHAR(100) NOT NULL,
                 last_name VARCHAR(100) NOT NULL,
-                hashed_password VARCHAR(255) NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
                 role VARCHAR(20) NOT NULL,
                 department_id INTEGER,
                 is_active BOOLEAN DEFAULT TRUE,
@@ -982,19 +982,19 @@ async def init_database():
         
         # Create admin user
         admin_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "admin123")
-        hashed_password = bcrypt.hashpw(admin_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        
+        password_hash = bcrypt.hashpw(admin_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
         cursor.execute("""
-            INSERT INTO users (email, first_name, last_name, hashed_password, role, department_id, is_active)
+            INSERT INTO users (email, first_name, last_name, password_hash, role, department_id, is_active)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (email) DO UPDATE SET
                 first_name = EXCLUDED.first_name,
                 last_name = EXCLUDED.last_name,
-                hashed_password = EXCLUDED.hashed_password,
+                password_hash = EXCLUDED.password_hash,
                 role = EXCLUDED.role,
                 department_id = EXCLUDED.department_id,
                 is_active = EXCLUDED.is_active
-        """, ('admin@iaa.edu.in', 'System', 'Administrator', hashed_password, 'admin', 1, True))
+        """, ('admin@iaa.edu.in', 'System', 'Administrator', password_hash, 'admin', 1, True))
         
         # Forms table with all fields
         cursor.execute("""
@@ -1057,6 +1057,241 @@ async def init_database():
                 connection.close()
             except Exception:
                 pass
+
+                cur.execute("ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT TRUE")
+
+            cur.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'users' AND column_name = 'last_login'
+            """)
+            if not cur.fetchone():
+
+                cur.execute("ALTER TABLE users ADD COLUMN last_login TIMESTAMP")
+
+            cur.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'users' AND column_name = 'has_selected_departments'
+            """)
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE users ADD COLUMN has_selected_departments BOOLEAN DEFAULT FALSE")
+
+            # Check if users table has supervisor_email column, if not add it
+            cur.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'users' AND column_name = 'supervisor_email'
+            """)
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE users ADD COLUMN supervisor_email VARCHAR(255)")
+
+            # Forms table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS forms (
+                    id SERIAL PRIMARY KEY,
+                    title VARCHAR(500) NOT NULL,
+                    description TEXT,
+                    creator_id INTEGER REFERENCES users(id) NOT NULL,
+                    department_id INTEGER REFERENCES departments(id) NOT NULL,
+                    trainer_id INTEGER REFERENCES users(id),
+                    form_data JSONB NOT NULL,
+                    status VARCHAR(20) DEFAULT 'draft',
+                    type VARCHAR(20) DEFAULT 'single-use',
+                    due_date TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    published_at TIMESTAMP
+                )
+            """)
+
+            # Add due_date column if it doesn't exist (for existing databases)
+            cur.execute("""
+                ALTER TABLE forms
+                ADD COLUMN IF NOT EXISTS due_date TIMESTAMP
+            """)
+
+            # Add status column if it doesn't exist and migrate from is_published
+            cur.execute("""
+                ALTER TABLE forms
+                ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'draft'
+            """)
+
+            # Add creator_id column if it doesn't exist and migrate from trainer_id
+            cur.execute("""
+                ALTER TABLE forms
+                ADD COLUMN IF NOT EXISTS creator_id INTEGER REFERENCES users(id)
+            """)
+
+            # Migrate existing data from trainer_id to creator_id if creator_id is null
+            cur.execute("""
+                UPDATE forms
+                SET creator_id = trainer_id
+                WHERE creator_id IS NULL AND trainer_id IS NOT NULL
+            """)
+
+            # Migrate existing data from is_published to status
+            cur.execute("""
+                UPDATE forms
+                SET status = CASE
+                    WHEN is_published = true THEN 'published'
+                    ELSE 'draft'
+                END
+                WHERE status IS NULL OR status = 'draft'
+            """)
+
+            # Add form_request_id column to forms table if it doesn't exist
+            cur.execute("""
+                ALTER TABLE forms
+                ADD COLUMN IF NOT EXISTS form_request_id INTEGER REFERENCES form_requests(id)
+            """)
+
+            # Add form_created columns to form_requests table if they don't exist
+            cur.execute("""
+                ALTER TABLE form_requests
+                ADD COLUMN IF NOT EXISTS form_created BOOLEAN DEFAULT FALSE
+            """)
+
+            cur.execute("""
+                ALTER TABLE form_requests
+                ADD COLUMN IF NOT EXISTS form_created_at TIMESTAMP
+            """)
+
+            # Update form_responses table to allow nullable user_id and add submitted_at
+            try:
+                cur.execute("""
+                    ALTER TABLE form_responses
+                    ALTER COLUMN user_id DROP NOT NULL
+                """)
+                cur.execute("""
+                    ALTER TABLE form_responses
+                    ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                """)
+                cur.execute("""
+                    UPDATE form_responses
+                    SET submitted_at = created_at
+                    WHERE submitted_at IS NULL
+                """)
+            except Exception as e:
+                pass
+
+            # Add missing columns to forms table if they don't exist
+            try:
+                cur.execute("ALTER TABLE forms ADD COLUMN IF NOT EXISTS type VARCHAR(20) DEFAULT 'single-use'")
+                cur.execute("ALTER TABLE forms ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT FALSE")
+            except Exception as e:
+                pass
+
+            # Form responses table - preserve existing data
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS form_responses (
+                    id SERIAL PRIMARY KEY,
+                    form_id INTEGER REFERENCES forms(id) ON DELETE CASCADE NOT NULL,
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    response_data JSONB NOT NULL,
+                    is_anonymous BOOLEAN DEFAULT FALSE,
+                    is_complete BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Form requests table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS form_requests (
+                    id SERIAL PRIMARY KEY,
+                    trainer_id INTEGER REFERENCES users(id) NOT NULL,
+                    title VARCHAR(500) NOT NULL,
+                    description TEXT,
+                    department_id INTEGER REFERENCES departments(id),
+                    session_name VARCHAR(200),
+                    session_date DATE,
+                    session_duration INTEGER DEFAULT 60,
+                    form_validity_duration INTEGER DEFAULT 7,
+                    form_type VARCHAR(50) DEFAULT 'feedback',
+                    priority VARCHAR(20) DEFAULT 'normal',
+                    additional_notes TEXT,
+                    status VARCHAR(20) DEFAULT 'pending',
+                    admin_response TEXT,
+                    reviewed_by INTEGER REFERENCES users(id),
+                    reviewed_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Form deletion requests table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS form_deletion_requests (
+                    id SERIAL PRIMARY KEY,
+                    form_id INTEGER REFERENCES forms(id) NOT NULL,
+                    trainer_id INTEGER REFERENCES users(id) NOT NULL,
+                    reason TEXT,
+                    status VARCHAR(20) DEFAULT 'pending',
+                    admin_response TEXT,
+                    reviewed_by INTEGER REFERENCES users(id),
+                    reviewed_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Add form_data and due_date columns to form_requests if they don't exist
+            try:
+                cur.execute("""
+                    ALTER TABLE form_requests
+                    ADD COLUMN IF NOT EXISTS form_data JSONB,
+                    ADD COLUMN IF NOT EXISTS due_date TIMESTAMP
+                """)
+
+            except Exception as e:
+                pass
+
+            # Reports settings table for configuration
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS reports_settings (
+                    id SERIAL PRIMARY KEY,
+                    setting_name VARCHAR(100) UNIQUE NOT NULL,
+                    setting_value TEXT NOT NULL,
+                    description TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Insert default report generation delay setting
+            cur.execute("""
+                INSERT INTO reports_settings (setting_name, setting_value, description)
+                VALUES ('auto_generation_delay_days', '1', 'Number of days after due date to automatically generate reports')
+                ON CONFLICT (setting_name) DO NOTHING
+            """)
+
+            # Add new columns to existing form_requests table if they don't exist
+            try:
+                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS department_id INTEGER REFERENCES departments(id)")
+                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS session_name VARCHAR(200)")
+                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS session_date DATE")
+                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS session_duration INTEGER DEFAULT 60")
+                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS form_validity_duration INTEGER DEFAULT 7")
+                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS form_type VARCHAR(50) DEFAULT 'feedback'")
+                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS priority VARCHAR(20) DEFAULT 'normal'")
+                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS additional_notes TEXT")
+
+            except Exception as e:
+
+                pass
+
+            # Remove ALL problematic columns that cause NOT NULL constraint errors
+            try:
+                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS purpose")
+                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS target_department")
+                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS question_types")
+                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS duration")
+                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS submission_limit")
+                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS response_limit")
+                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS auto_close")
+                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS notification_settings")
+
+            except Exception as e:
+
+                pass
+
+                        # Schema initialization is handled in init_database() and startup_handler()
 
 # Initialize database on startup
 async def startup_handler():
