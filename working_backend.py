@@ -945,7 +945,6 @@ def init_database():
         cursor = connection.cursor()
         
         print("Creating/updating database tables...")
-        
         # Departments table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS departments (
