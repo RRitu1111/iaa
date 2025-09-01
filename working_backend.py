@@ -63,7 +63,7 @@ if not DATABASE_URL:
     # Construct URL with proper escaping of special characters
     from urllib.parse import quote_plus
     DATABASE_URL = f"postgresql://{quote_plus(DB_USER)}:{quote_plus(DB_PASSWORD)}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-JWT_SECRET = os.getenv("JWT_SECRET", "iaa-production-jwt-secret-2024")
+JWT_SECRET = os.getenv("JWT_SECRET", "new-jwt-secret-2024")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 JWT_REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7"))
@@ -648,9 +648,9 @@ def generate_comprehensive_report(form_id: int) -> dict:
     """Generate comprehensive analytics report for a form"""
     try:
         with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 # Get form details
-                cur.execute("""
+                cursor.execute("""
                     SELECT f.*, u.first_name || ' ' || u.last_name as creator_name,
                            d.name as department_name
                     FROM forms f
@@ -659,14 +659,14 @@ def generate_comprehensive_report(form_id: int) -> dict:
                     WHERE f.id = %s
                 """, (form_id,))
 
-                form = cur.fetchone()
+                form = cursor.fetchone()
                 if not form:
                     return {"error": "Form not found"}
 
                 form_dict = dict(form)
 
                 # Get all responses
-                cur.execute("""
+                cursor.execute("""
                     SELECT fr.*, u.first_name || ' ' || u.last_name as user_name,
                            u.email as user_email, d.name as department_name
                     FROM form_responses fr
@@ -675,7 +675,7 @@ def generate_comprehensive_report(form_id: int) -> dict:
                     WHERE fr.form_id = %s
                 """, (form_id,))
 
-                responses = cur.fetchall()
+                responses = cursor.fetchall()
 
                 if not responses:
                     return {
@@ -775,9 +775,9 @@ async def check_and_generate_reports():
     """Background task to check for forms that need reports and generate them"""
     try:
         with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 # Find forms that are published and have responses but no recent reports
-                cur.execute("""
+                cursor.execute("""
                     SELECT f.id, f.title, f.due_date, COUNT(fr.id) as response_count
                     FROM forms f
                     LEFT JOIN form_responses fr ON f.id = fr.form_id
@@ -787,7 +787,7 @@ async def check_and_generate_reports():
                     HAVING COUNT(fr.id) > 0
                 """)
 
-                forms_needing_reports = cur.fetchall()
+                forms_needing_reports = cursor.fetchall()
 
                 for form in forms_needing_reports:
                     form_dict = dict(form)
@@ -815,10 +815,10 @@ async def send_low_score_alert(form_data: dict, report: dict):
     """Send email alert for low scoring forms"""
     try:
         with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 # Get admin emails
-                cur.execute("SELECT email FROM users WHERE role = 'admin'")
-                admin_emails = [row['email'] for row in cur.fetchall()]
+                cursor.execute("SELECT email FROM users WHERE role = 'admin'")
+                admin_emails = [row['email'] for row in cursor.fetchall()]
 
                 if not admin_emails:
 
@@ -916,9 +916,9 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     payload = verify_token(token)
 
     with get_db() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT * FROM users WHERE id = %s", (payload["user_id"],))
-            user = cur.fetchone()
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT * FROM users WHERE id = %s", (payload["user_id"],))
+            user = cursor.fetchone()
             if not user:
                 raise HTTPException(status_code=401, detail="User not found")
             return dict(user)
@@ -1048,7 +1048,7 @@ async def init_database():
         )
     finally:
 
-            cur.execute("""
+            cursor.execute("""
                 UPDATE forms
                 SET status = CASE
                     WHEN is_published = true THEN 'published'
@@ -1058,33 +1058,33 @@ async def init_database():
             """)
 
             # Add form_request_id column to forms table if it doesn't exist
-            cur.execute("""
+            cursor.execute("""
                 ALTER TABLE forms
                 ADD COLUMN IF NOT EXISTS form_request_id INTEGER REFERENCES form_requests(id)
             """)
 
             # Add form_created columns to form_requests table if they don't exist
-            cur.execute("""
+            cursor.execute("""
                 ALTER TABLE form_requests
                 ADD COLUMN IF NOT EXISTS form_created BOOLEAN DEFAULT FALSE
             """)
 
-            cur.execute("""
+            cursor.execute("""
                 ALTER TABLE form_requests
                 ADD COLUMN IF NOT EXISTS form_created_at TIMESTAMP
             """)
 
             # Update form_responses table to allow nullable user_id and add submitted_at
             try:
-                cur.execute("""
+                cursor.execute("""
                     ALTER TABLE form_responses
                     ALTER COLUMN user_id DROP NOT NULL
                 """)
-                cur.execute("""
+                cursor.execute("""
                     ALTER TABLE form_responses
                     ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 """)
-                cur.execute("""
+                cursor.execute("""
                     UPDATE form_responses
                     SET submitted_at = created_at
                     WHERE submitted_at IS NULL
@@ -1175,7 +1175,7 @@ async def init_database():
             """)
 
             # Insert default report generation delay setting
-            cur.execute("""
+            cursor.execute("""
                 INSERT INTO reports_settings (setting_name, setting_value, description)
                 VALUES ('auto_generation_delay_days', '1', 'Number of days after due date to automatically generate reports')
                 ON CONFLICT (setting_name) DO NOTHING
@@ -1183,14 +1183,14 @@ async def init_database():
 
             # Add new columns to existing form_requests table if they don't exist
             try:
-                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS department_id INTEGER REFERENCES departments(id)")
-                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS session_name VARCHAR(200)")
-                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS session_date DATE")
-                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS session_duration INTEGER DEFAULT 60")
-                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS form_validity_duration INTEGER DEFAULT 7")
-                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS form_type VARCHAR(50) DEFAULT 'feedback'")
-                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS priority VARCHAR(20) DEFAULT 'normal'")
-                cur.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS additional_notes TEXT")
+                cursor.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS department_id INTEGER REFERENCES departments(id)")
+                cursor.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS session_name VARCHAR(200)")
+                cursor.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS session_date DATE")
+                cursor.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS session_duration INTEGER DEFAULT 60")
+                cursor.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS form_validity_duration INTEGER DEFAULT 7")
+                cursor.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS form_type VARCHAR(50) DEFAULT 'feedback'")
+                cursor.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS priority VARCHAR(20) DEFAULT 'normal'")
+                cursor.execute("ALTER TABLE form_requests ADD COLUMN IF NOT EXISTS additional_notes TEXT")
 
             except Exception as e:
 
@@ -1198,14 +1198,14 @@ async def init_database():
 
             # Remove ALL problematic columns that cause NOT NULL constraint errors
             try:
-                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS purpose")
-                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS target_department")
-                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS question_types")
-                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS duration")
-                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS submission_limit")
-                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS response_limit")
-                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS auto_close")
-                cur.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS notification_settings")
+                cursor.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS purpose")
+                cursor.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS target_department")
+                cursor.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS question_types")
+                cursor.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS duration")
+                cursor.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS submission_limit")
+                cursor.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS response_limit")
+                cursor.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS auto_close")
+                cursor.execute("ALTER TABLE form_requests DROP COLUMN IF EXISTS notification_settings")
 
             except Exception as e:
 
@@ -1328,7 +1328,7 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 if current_user["role"] == "admin":
                     # Admin dashboard stats - optimized single query
-                    cur.execute("""
+                    cursor.execute("""
                         SELECT
                             (SELECT COUNT(*) FROM forms) as total_forms,
                             (SELECT COUNT(*) FROM forms WHERE status = 'published' OR is_published = true) as active_forms,
@@ -1356,7 +1356,7 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
 
                 elif current_user["role"] == "trainer":
                     # Trainer dashboard stats - optimized single query
-                    cur.execute("""
+                    cursor.execute("""
                         SELECT
                             (SELECT COUNT(*) FROM forms WHERE trainer_id = %s OR creator_id = %s) as my_forms,
                             (SELECT COUNT(*) FROM forms WHERE (trainer_id = %s OR creator_id = %s) AND (status = 'published' OR is_published = true)) as active_forms,
@@ -1407,13 +1407,13 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
                             }
                         }
 
-                    cur.execute("""
+                    cursor.execute("""
                         SELECT COUNT(*) as count FROM forms f
                         WHERE f.department_id = %s AND f.is_published = true
                     """, (current_user["department_id"],))
                     available_forms = cur.fetchone()['count']
 
-                    cur.execute("""
+                    cursor.execute("""
                         SELECT COUNT(*) as count FROM form_responses fr
                         JOIN forms f ON fr.form_id = f.id
                         WHERE fr.user_id = %s
@@ -1468,7 +1468,7 @@ async def register(user_data: UserRegister):
                 hashed_password = hash_password(user_data.password)
 
                 # Insert user
-                cur.execute("""
+                cursor.execute("""
                     INSERT INTO users (email, first_name, last_name, hashed_password, role, department_id, supervisor_email, is_active, created_at, updated_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     RETURNING id, email, first_name, last_name, role, department_id, supervisor_email, is_active, created_at
@@ -1692,7 +1692,7 @@ async def create_form(form_data: FormCreate, current_user: dict = Depends(get_cu
                 # Set published_at if status is 'published'
                 published_at_value = datetime.now() if form_data.status == 'published' else None
 
-                cur.execute("""
+                cursor.execute("""
                     INSERT INTO forms (title, description, creator_id, trainer_id, department_id, form_data, due_date, status, published_at, created_at, updated_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     RETURNING id, title, description, creator_id, trainer_id, department_id, form_data, due_date, status, published_at, created_at, updated_at
@@ -1740,7 +1740,7 @@ async def get_forms(current_user: dict = Depends(get_current_user)):
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 if current_user["role"] == "admin":
                     # Admin sees all forms with response counts - using subquery for accurate counting
-                    cur.execute("""
+                    cursor.execute("""
                         SELECT f.*, u.first_name || ' ' || u.last_name as creator_name,
                                d.name as department_name,
                                COALESCE(rc.response_count, 0) as response_count,
@@ -1757,7 +1757,7 @@ async def get_forms(current_user: dict = Depends(get_current_user)):
                     """)
                 elif current_user["role"] == "trainer":
                     # Trainer sees their own forms with response counts - using subquery for accurate counting
-                    cur.execute("""
+                    cursor.execute("""
                         SELECT f.*, u.first_name || ' ' || u.last_name as creator_name,
                                d.name as department_name,
                                COALESCE(rc.response_count, 0) as response_count,
@@ -1775,7 +1775,7 @@ async def get_forms(current_user: dict = Depends(get_current_user)):
                     """, (current_user["id"], current_user["id"]))
                 else:
                     # Trainee sees forms for their department with completion status
-                    cur.execute("""
+                    cursor.execute("""
                         SELECT f.*, u.first_name || ' ' || u.last_name as creator_name,
                                d.name as department_name,
                                CASE WHEN fr.id IS NOT NULL THEN true ELSE false END as is_completed,
@@ -1826,7 +1826,7 @@ async def get_form(form_id: int, current_user: dict = Depends(get_current_user))
     try:
         with get_db() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
+                cursor.execute("""
                     SELECT f.*,
                            COALESCE(u.first_name || ' ' || u.last_name, 'Unknown Trainer') as creator_name,
                            COALESCE(d.name, 'Unknown Department') as department_name,
