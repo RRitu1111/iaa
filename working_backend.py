@@ -926,25 +926,24 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 # Initialize database
 def init_database():
     """Initialize the database schema and create default records"""
-    print("Initializing database...")
+    print("Initializing database schema and default records...")
+    
     try:
         with get_db() as conn:
-            conn.autocommit = False  # Start transaction mode
+            conn.autocommit = False  # Enable transaction mode
             with conn.cursor() as cur:
-            # Create tables
-
-            # Departments table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS departments (
-                    id SERIAL PRIMARY KEY,
-                    name VARCHAR(200) NOT NULL,
-                    code VARCHAR(20) UNIQUE NOT NULL,
-                    description TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-
-            # Users table
+                print("Creating/updating database tables...")
+                
+                # Departments table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS departments (
+                        id SERIAL PRIMARY KEY,
+                        name VARCHAR(200) NOT NULL,
+                        code VARCHAR(20) UNIQUE NOT NULL,
+                        description TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)            # Users table
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
@@ -1282,6 +1281,15 @@ def init_database():
                 conn.rollback()
                 print(f"Error committing changes: {str(commit_error)}")
                 raise
+    except Exception as e:
+        print(f"Error during database initialization: {str(e)}")
+        import traceback
+        print("Full error traceback:")
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database initialization failed: {str(e)}"
+        )
 
 # Initialize database on startup
 def startup_handler():
