@@ -1057,31 +1057,6 @@ async def init_database():
             cursor.close()
         if connection:
             connection.close()
-                
-                # Departments table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS departments (
-                        id SERIAL PRIMARY KEY,
-                        name VARCHAR(200) NOT NULL,
-                        code VARCHAR(20) UNIQUE NOT NULL,
-                        description TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)            # Users table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id SERIAL PRIMARY KEY,
-                    email VARCHAR(255) UNIQUE NOT NULL,
-                    first_name VARCHAR(100) NOT NULL,
-                    last_name VARCHAR(100) NOT NULL,
-                    hashed_password VARCHAR(255) NOT NULL,
-                    role VARCHAR(20) NOT NULL,
-                    department_id INTEGER REFERENCES departments(id),
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_login TIMESTAMP
-                )
-            """)
 
             # Remove foreign key constraint from department_id to allow any numeric value
             try:
@@ -1420,14 +1395,49 @@ async def startup_handler():
     """Handle database initialization during application startup"""
     try:
         print("Starting database initialization...")
-        await init_database()
+        connection = psycopg2.connect(
+            DATABASE_URL,
+            connect_timeout=10,
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5,
+            application_name="IAA_Feedback_System"
+        )
+        cursor = connection.cursor()
+        
+        print("Creating/updating database tables...")
+        # Departments table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS departments (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(200) NOT NULL,
+                code VARCHAR(20) UNIQUE NOT NULL,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Insert default departments
+        cursor.execute("""
+            INSERT INTO departments (name, code, description) VALUES
+            ('Flight Operations', 'DEPT001', 'Flight training and operations'),
+            ('Aircraft Maintenance', 'DEPT002', 'Aircraft maintenance and engineering'),
+            ('Air Traffic Control', 'DEPT003', 'Air traffic control operations'),
+            ('Ground Operations', 'DEPT004', 'Ground handling and operations'),
+            ('Aviation Safety', 'DEPT005', 'Safety and security operations'),
+            ('Cabin Crew', 'DEPT006', 'Cabin crew training and operations')
+            ON CONFLICT (code) DO NOTHING
+        """)
+        
+        # Commit changes and close connections
+        connection.commit()
         print("Database initialization completed successfully")
-    except HTTPException as he:
-        print(f"HTTP error during startup: {str(he)}")
-        raise he
+        cursor.close()
+        connection.close()
+        
     except Exception as e:
         print(f"Error during startup: {str(e)}")
-        # Log the full error details
         import traceback
         print("Full error traceback:")
         print(traceback.format_exc())
@@ -1436,8 +1446,9 @@ async def startup_handler():
             detail=f"Failed to initialize database: {str(e)}"
         )
 
-# Call startup handler when module is imported
-asyncio.run(startup_handler())
+@app.on_event("startup")
+async def on_startup():
+    await startup_handler()
 
 # Routes
 @app.get("/")
