@@ -1094,13 +1094,13 @@ async def init_database():
 
             # Add missing columns to forms table if they don't exist
             try:
-                cur.execute("ALTER TABLE forms ADD COLUMN IF NOT EXISTS type VARCHAR(20) DEFAULT 'single-use'")
-                cur.execute("ALTER TABLE forms ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT FALSE")
+                cursor.execute("ALTER TABLE forms ADD COLUMN IF NOT EXISTS type VARCHAR(20) DEFAULT 'single-use'")
+                cursor.execute("ALTER TABLE forms ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT FALSE")
             except Exception as e:
                 pass
 
             # Form responses table - preserve existing data
-            cur.execute("""
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS form_responses (
                     id SERIAL PRIMARY KEY,
                     form_id INTEGER REFERENCES forms(id) ON DELETE CASCADE NOT NULL,
@@ -1114,7 +1114,7 @@ async def init_database():
             """)
 
             # Form requests table
-            cur.execute("""
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS form_requests (
                     id SERIAL PRIMARY KEY,
                     trainer_id INTEGER REFERENCES users(id) NOT NULL,
@@ -1137,7 +1137,7 @@ async def init_database():
             """)
 
             # Form deletion requests table
-            cur.execute("""
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS form_deletion_requests (
                     id SERIAL PRIMARY KEY,
                     form_id INTEGER REFERENCES forms(id) NOT NULL,
@@ -1153,7 +1153,7 @@ async def init_database():
 
             # Add form_data and due_date columns to form_requests if they don't exist
             try:
-                cur.execute("""
+                cursor.execute("""
                     ALTER TABLE form_requests
                     ADD COLUMN IF NOT EXISTS form_data JSONB,
                     ADD COLUMN IF NOT EXISTS due_date TIMESTAMP
@@ -1163,7 +1163,7 @@ async def init_database():
                 pass
 
             # Reports settings table for configuration
-            cur.execute("""
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS reports_settings (
                     id SERIAL PRIMARY KEY,
                     setting_name VARCHAR(100) UNIQUE NOT NULL,
