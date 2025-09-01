@@ -924,7 +924,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
             return dict(user)
 
 # Initialize database
-def init_database():
+async def init_database():
     """Initialize the database schema and create default records"""
     print("Initializing database schema and default records...")
     
@@ -1416,11 +1416,11 @@ def init_database():
         )
 
 # Initialize database on startup
-def startup_handler():
+async def startup_handler():
     """Handle database initialization during application startup"""
     try:
         print("Starting database initialization...")
-        init_database()
+        await init_database()
         print("Database initialization completed successfully")
     except HTTPException as he:
         print(f"HTTP error during startup: {str(he)}")
@@ -1437,7 +1437,7 @@ def startup_handler():
         )
 
 # Call startup handler when module is imported
-startup_handler()
+asyncio.run(startup_handler())
 
 # Routes
 @app.get("/")
