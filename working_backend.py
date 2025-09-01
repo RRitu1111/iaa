@@ -927,26 +927,17 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 async def init_database():
     """Initialize the database schema and create default records"""
     print("Initializing database schema and default records...")
-    
     connection = None
     cursor = None
     try:
         # Establish connection
-        connection = psycopg2.connect(
-            DATABASE_URL,
-            connect_timeout=10,
-            keepalives=1,
-            keepalives_idle=30,
-            keepalives_interval=10,
-            keepalives_count=5,
-            application_name="IAA_Feedback_System"
-        )
+        connection = psycopg2.connect(DATABASE_URL)
         connection.autocommit = False  # Enable transaction mode
         cursor = connection.cursor()
-        
         print("Creating/updating database tables...")
         # Departments table
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS departments (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(200) NOT NULL,
@@ -954,10 +945,12 @@ async def init_database():
                 description TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """)
-        
+            """
+        )
+
         # Insert default departments
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO departments (name, code, description) VALUES
             ('Flight Operations', 'DEPT001', 'Flight training and operations'),
             ('Aircraft Maintenance', 'DEPT002', 'Aircraft maintenance and engineering'),
@@ -966,7 +959,8 @@ async def init_database():
             ('Aviation Safety', 'DEPT005', 'Safety and security operations'),
             ('Cabin Crew', 'DEPT006', 'Cabin crew training and operations')
             ON CONFLICT (code) DO NOTHING
-        """)
+            """
+        )
         
         # Users table with all necessary columns
         cursor.execute("""
@@ -1054,35 +1048,36 @@ async def init_database():
         )
     finally:
         if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
-
-            # Remove foreign key constraint from department_id to allow any numeric value
             try:
-                cur.execute("""
-                    ALTER TABLE users DROP CONSTRAINT IF EXISTS users_department_id_fkey
-                """)
-                cur.execute("""
-                    ALTER TABLE users DROP CONSTRAINT IF EXISTS fk_users_department
-                """)
-
-            except Exception as e:
+                cursor.close()
+            except Exception:
                 pass
+        if connection:
+            try:
+                connection.close()
+            except Exception:
+                pass
+                """)
+                if not cursor.fetchone():
+                    cursor.execute("ALTER TABLE users ADD COLUMN hashed_password VARCHAR(255)")
 
-            # Check if users table has required columns, if not add them
-            cur.execute("""
-                SELECT column_name FROM information_schema.columns
-                WHERE table_name = 'users' AND column_name = 'hashed_password'
-            """)
-            if not cur.fetchone():
-
-                cur.execute("ALTER TABLE users ADD COLUMN hashed_password VARCHAR(255)")
-
-            cur.execute("""
-                SELECT column_name FROM information_schema.columns
-                WHERE table_name = 'users' AND column_name = 'role'
-            """)
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name = 'users' AND column_name = 'role'
+                """)
+                if not cursor.fetchone():
+                    cursor.execute("ALTER TABLE users ADD COLUMN role VARCHAR(20)")
+                
+                # Finally close the cursor and connection
+                cursor.close()
+                
+            if connection:
+                connection.commit()
+                connection.close()
+        except Exception:
+            if connection:
+                connection.rollback()
+            pass
             if not cur.fetchone():
 
                 cur.execute("ALTER TABLE users ADD COLUMN role VARCHAR(20)")
@@ -1326,116 +1321,15 @@ async def init_database():
 
                 pass
 
-            # Check if departments table has code column, if not add it
-            cur.execute("""
-                SELECT column_name FROM information_schema.columns
-                WHERE table_name = 'departments' AND column_name = 'code'
-            """)
-            if not cur.fetchone():
-
-                cur.execute("ALTER TABLE departments ADD COLUMN code VARCHAR(20)")
-                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS departments_code_unique ON departments(code)")
-
-            # Insert default departments
-            cur.execute("""
-                INSERT INTO departments (name, code, description) VALUES
-                ('Flight Operations', 'DEPT001', 'Flight training and operations'),
-                ('Aircraft Maintenance', 'DEPT002', 'Aircraft maintenance and engineering'),
-                ('Air Traffic Control', 'DEPT003', 'Air traffic control operations'),
-                ('Ground Operations', 'DEPT004', 'Ground handling and operations'),
-                ('Aviation Safety', 'DEPT005', 'Safety and security operations'),
-                ('Cabin Crew', 'DEPT006', 'Cabin crew training and operations')
-                ON CONFLICT (code) DO NOTHING
-            """)
-
-            # Insert default admin user
-
-            admin_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "admin123")  # CHANGE IN PRODUCTION
-            hashed_password = bcrypt.hashpw(admin_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-            cur.execute("""
-                INSERT INTO users (email, first_name, last_name, hashed_password, role, department_id, is_active)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (email) DO UPDATE SET
-                    first_name = EXCLUDED.first_name,
-                    last_name = EXCLUDED.last_name,
-                    hashed_password = EXCLUDED.hashed_password,
-                    role = EXCLUDED.role,
-                    department_id = EXCLUDED.department_id,
-                    is_active = EXCLUDED.is_active
-            """, (
-                'admin@iaa.edu.in',
-                'System',
-                'Administrator',
-                hashed_password,
-                'admin',
-                1,  # Default to first department
-                True
-            ))
-
-            try:
-                conn.commit()
-                print("Database changes committed successfully")
-            except Exception as commit_error:
-                conn.rollback()
-                print(f"Error committing changes: {str(commit_error)}")
-                raise
-        except Exception as e:
-            print(f"Error during database initialization: {str(e)}")
-            import traceback
-            print("Full error traceback:")
-            print(traceback.format_exc())
-            raise HTTPException(
-                status_code=500,
-                detail=f"Database initialization failed: {str(e)}"
-            )
+                        # Schema initialization is handled in init_database() and startup_handler()
 
 # Initialize database on startup
 async def startup_handler():
     """Handle database initialization during application startup"""
     try:
         print("Starting database initialization...")
-        connection = psycopg2.connect(
-            DATABASE_URL,
-            connect_timeout=10,
-            keepalives=1,
-            keepalives_idle=30,
-            keepalives_interval=10,
-            keepalives_count=5,
-            application_name="IAA_Feedback_System"
-        )
-        cursor = connection.cursor()
-        
-        print("Creating/updating database tables...")
-        # Departments table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS departments (
-                id SERIAL PRIMARY KEY,
-                name VARCHAR(200) NOT NULL,
-                code VARCHAR(20) UNIQUE NOT NULL,
-                description TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # Insert default departments
-        cursor.execute("""
-            INSERT INTO departments (name, code, description) VALUES
-            ('Flight Operations', 'DEPT001', 'Flight training and operations'),
-            ('Aircraft Maintenance', 'DEPT002', 'Aircraft maintenance and engineering'),
-            ('Air Traffic Control', 'DEPT003', 'Air traffic control operations'),
-            ('Ground Operations', 'DEPT004', 'Ground handling and operations'),
-            ('Aviation Safety', 'DEPT005', 'Safety and security operations'),
-            ('Cabin Crew', 'DEPT006', 'Cabin crew training and operations')
-            ON CONFLICT (code) DO NOTHING
-        """)
-        
-        # Commit changes and close connections
-        connection.commit()
+        await init_database()
         print("Database initialization completed successfully")
-        cursor.close()
-        connection.close()
-        
     except Exception as e:
         print(f"Error during startup: {str(e)}")
         import traceback
