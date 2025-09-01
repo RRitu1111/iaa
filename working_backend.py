@@ -1380,15 +1380,15 @@ async def init_database():
                 conn.rollback()
                 print(f"Error committing changes: {str(commit_error)}")
                 raise
-    except Exception as e:
-        print(f"Error during database initialization: {str(e)}")
-        import traceback
-        print("Full error traceback:")
-        print(traceback.format_exc())
-        raise HTTPException(
-            status_code=500,
-            detail=f"Database initialization failed: {str(e)}"
-        )
+        except Exception as e:
+            print(f"Error during database initialization: {str(e)}")
+            import traceback
+            print("Full error traceback:")
+            print(traceback.format_exc())
+            raise HTTPException(
+                status_code=500,
+                detail=f"Database initialization failed: {str(e)}"
+            )
 
 # Initialize database on startup
 async def startup_handler():
